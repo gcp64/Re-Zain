@@ -1,105 +1,114 @@
 package com.bob.mediacompressor.data.repository
 
-import android.media.MediaExtractor
-import android.media.MediaMuxer
+import com.antonkarpenko.ffmpegkit.FFmpegKit
+import com.antonkarpenko.ffmpegkit.FFprobeKit
 import com.bob.mediacompressor.domain.model.CompressionConfig
 import com.bob.mediacompressor.domain.model.CompressionLevel
 import com.bob.mediacompressor.domain.repository.VideoCompressor
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.flowOn
 import java.io.File
-import java.nio.ByteBuffer
+import java.util.StringJoiner
 import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
 class FFmpegVideoCompressor @Inject constructor() : VideoCompressor {
 
-    @Volatile
-    private var isCancelled = false
+    private var activeSessionId: Long? = null
 
     override fun compressVideo(
         inputFile: File,
         outputFile: File,
         config: CompressionConfig
-    ): Flow<Float> = flow {
-        isCancelled = false
-        emit(0.0f)
+    ): Flow<Float> = callbackFlow {
+        // 1. Get video duration using FFprobe for progress tracking
+        val infoSession = FFprobeKit.getMediaInformation(inputFile.absolutePath)
+        val mediaInformation = infoSession.mediaInformation
+        val durationSeconds = mediaInformation?.duration?.toDoubleOrNull() ?: 0.0
 
-        val extractor = MediaExtractor()
-        try {
-            extractor.setDataSource(inputFile.absolutePath)
+        // 2. Build FFmpeg command parameters
+        val cmd = StringJoiner(" ")
+        cmd.add("-y")
+        cmd.add("-i").add("\"${inputFile.absolutePath}\"")
 
-            val muxer = MediaMuxer(outputFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
-            val trackCount = extractor.trackCount
-            val trackIndexMap = mutableMapOf<Int, Int>()
+        // Codec selection (H.265 / HEVC for high compression efficiency)
+        cmd.add("-c:v").add("libx265")
 
-            // Select tracks (skip audio if removeAudio is true)
-            for (i in 0 until trackCount) {
-                val format = extractor.getTrackFormat(i)
-                val mime = format.getString(android.media.MediaFormat.KEY_MIME) ?: ""
-                if (config.removeAudio && mime.startsWith("audio/")) {
-                    continue
-                }
-                extractor.selectTrack(i)
-                val muxerTrackIndex = muxer.addTrack(format)
-                trackIndexMap[i] = muxerTrackIndex
+        // CRF setting (Constant Rate Factor) based on quality level
+        val crf = when (config.level) {
+            CompressionLevel.LOW -> 30      // Higher CRF = lower quality, smaller file
+            CompressionLevel.MEDIUM -> 27   // Balanced
+            CompressionLevel.HIGH -> 24     // Lower CRF = higher quality, larger file
+        }
+        cmd.add("-crf").add(crf.toString())
+
+        // Preset (compression speed vs efficiency)
+        cmd.add("-preset").add("fast")
+
+        // Video filters (resolution & formatting)
+        val videoFilters = StringJoiner(",")
+        config.customResolutionHeight?.let { height ->
+            // scale aspect ratio to target height, ensuring width is divisible by 2 for H.265
+            videoFilters.add("scale=-2:$height")
+        }
+        config.customFps?.let { fps ->
+            videoFilters.add("fps=fps=$fps")
+        }
+        // Always enforce standard YUV420P pixel format for wide device compatibility
+        videoFilters.add("format=yuv420p")
+
+        cmd.add("-vf").add("\"$videoFilters\"")
+
+        // Audio configuration
+        if (config.removeAudio) {
+            cmd.add("-an")
+        } else {
+            cmd.add("-c:a").add("aac")
+            cmd.add("-b:a").add("128k")
+        }
+
+        cmd.add("\"${outputFile.absolutePath}\"")
+
+        val commandString = cmd.toString()
+
+        // 3. Execute Async FFmpeg command
+        val session = FFmpegKit.executeAsync(commandString, { completionSession ->
+            val returnCode = completionSession.returnCode
+            if (returnCode.isValueSuccess) {
+                trySend(1.0f)
+                close()
+            } else if (returnCode.isValueCancel) {
+                close(Exception("Compression canceled by user"))
+            } else {
+                close(Exception("FFmpeg failed with state: ${completionSession.state}, logs: ${completionSession.failStackTrace}"))
             }
-
-            muxer.start()
-
-            val buffer = ByteBuffer.allocate(1024 * 1024) // 1MB buffer
-            val bufferInfo = android.media.MediaCodec.BufferInfo()
-
-            // Get total duration for progress
-            var totalDuration = 0L
-            for (i in 0 until trackCount) {
-                val format = extractor.getTrackFormat(i)
-                val duration = if (format.containsKey(android.media.MediaFormat.KEY_DURATION)) {
-                    format.getLong(android.media.MediaFormat.KEY_DURATION)
-                } else 0L
-                if (duration > totalDuration) totalDuration = duration
+        }, { /* Logs ignored here to avoid spamming callbacks */ }, { statistics ->
+            if (durationSeconds > 0) {
+                // statistics.time is in milliseconds
+                val progress = (statistics.time / 1000.0) / durationSeconds
+                trySend(progress.toFloat().coerceIn(0.0f, 0.99f))
             }
+        })
 
-            while (!isCancelled) {
-                val sampleSize = extractor.readSampleData(buffer, 0)
-                if (sampleSize < 0) break
+        activeSessionId = session.sessionId
 
-                val trackIndex = extractor.sampleTrackIndex
-                val muxerIndex = trackIndexMap[trackIndex]
-                if (muxerIndex != null) {
-                    bufferInfo.offset = 0
-                    bufferInfo.size = sampleSize
-                    bufferInfo.presentationTimeUs = extractor.sampleTime
-                    bufferInfo.flags = extractor.sampleFlags
-
-                    muxer.writeSampleData(muxerIndex, buffer, bufferInfo)
-                }
-
-                // Emit progress
-                if (totalDuration > 0) {
-                    val progress = (extractor.sampleTime.toFloat() / totalDuration).coerceIn(0.0f, 0.99f)
-                    emit(progress)
-                }
-
-                extractor.advance()
+        awaitClose {
+            // Cancel specific session if coroutine context is closed/cancelled
+            activeSessionId?.let {
+                FFmpegKit.cancel(it)
             }
-
-            muxer.stop()
-            muxer.release()
-            emit(1.0f)
-        } catch (e: Exception) {
-            // If output file was partially written, delete it
-            if (outputFile.exists()) outputFile.delete()
-            throw e
-        } finally {
-            extractor.release()
+            activeSessionId = null
         }
     }.flowOn(Dispatchers.IO)
 
     override fun cancel() {
-        isCancelled = true
+        activeSessionId?.let {
+            FFmpegKit.cancel(it)
+        }
+        activeSessionId = null
     }
 }

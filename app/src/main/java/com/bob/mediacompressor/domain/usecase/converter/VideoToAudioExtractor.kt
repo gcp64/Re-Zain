@@ -1,86 +1,48 @@
 package com.bob.mediacompressor.domain.usecase.converter
 
-import android.media.MediaExtractor
-import android.media.MediaFormat
-import android.media.MediaMuxer
+import com.antonkarpenko.ffmpegkit.FFmpegKit
+import com.antonkarpenko.ffmpegkit.FFprobeKit
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.flowOn
 import java.io.File
-import java.nio.ByteBuffer
 import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
 class VideoToAudioExtractor @Inject constructor() {
-    fun extract(inputFile: File, outputFile: File): Flow<Int> = flow {
-        emit(5)
-        val extractor = MediaExtractor()
-        try {
-            extractor.setDataSource(inputFile.absolutePath)
+    fun extract(inputFile: File, outputFile: File): Flow<Int> = callbackFlow {
+        // 1. Fetch input video duration for progress tracking
+        val infoSession = FFprobeKit.getMediaInformation(inputFile.absolutePath)
+        val mediaInformation = infoSession.mediaInformation
+        val durationSeconds = mediaInformation?.duration?.toDoubleOrNull() ?: 0.0
 
-            // Find the audio track
-            var audioTrackIndex = -1
-            var audioFormat: MediaFormat? = null
-            for (i in 0 until extractor.trackCount) {
-                val format = extractor.getTrackFormat(i)
-                val mime = format.getString(MediaFormat.KEY_MIME) ?: ""
-                if (mime.startsWith("audio/")) {
-                    audioTrackIndex = i
-                    audioFormat = format
-                    break
-                }
+        // 2. Build high-quality MP3 audio extraction command
+        // ffmpeg -i input.mp4 -vn -acodec libmp3lame -q:a 2 output.mp3
+        val cmd = "-y -i \"${inputFile.absolutePath}\" -vn -acodec libmp3lame -q:a 2 \"${outputFile.absolutePath}\""
+
+        // 3. Execute command asynchronously
+        val session = FFmpegKit.executeAsync(cmd, { completionSession ->
+            val returnCode = completionSession.returnCode
+            if (returnCode.isValueSuccess) {
+                trySend(100)
+                close()
+            } else if (returnCode.isValueCancel) {
+                close(Exception("Audio extraction canceled by user"))
+            } else {
+                close(Exception("FFmpeg audio extraction failed with state: ${completionSession.state}"))
             }
-
-            if (audioTrackIndex == -1 || audioFormat == null) {
-                throw Exception("No audio track found in video file")
+        }, {}, { statistics ->
+            if (durationSeconds > 0) {
+                val progress = ((statistics.time / 1000.0) / durationSeconds) * 100
+                trySend(progress.toInt().coerceIn(0, 99))
             }
+        })
 
-            extractor.selectTrack(audioTrackIndex)
-
-            // Use MPEG_4 container for extracted audio (M4A - widely compatible)
-            // Change output extension expectation: caller sends .mp3, but we produce .m4a-compatible
-            val muxer = MediaMuxer(outputFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
-            val muxerTrackIndex = muxer.addTrack(audioFormat)
-            muxer.start()
-
-            val totalDuration = if (audioFormat.containsKey(MediaFormat.KEY_DURATION)) {
-                audioFormat.getLong(MediaFormat.KEY_DURATION)
-            } else 1L
-
-            val buffer = ByteBuffer.allocate(1024 * 1024)
-            val bufferInfo = android.media.MediaCodec.BufferInfo()
-
-            emit(15)
-
-            while (true) {
-                val sampleSize = extractor.readSampleData(buffer, 0)
-                if (sampleSize < 0) break
-
-                bufferInfo.offset = 0
-                bufferInfo.size = sampleSize
-                bufferInfo.presentationTimeUs = extractor.sampleTime
-                bufferInfo.flags = extractor.sampleFlags
-
-                muxer.writeSampleData(muxerTrackIndex, buffer, bufferInfo)
-
-                if (totalDuration > 0) {
-                    val progress = 15 + ((extractor.sampleTime.toFloat() / totalDuration) * 80).toInt()
-                    emit(progress.coerceIn(15, 95))
-                }
-
-                extractor.advance()
-            }
-
-            muxer.stop()
-            muxer.release()
-            emit(100)
-        } catch (e: Exception) {
-            if (outputFile.exists()) outputFile.delete()
-            throw e
-        } finally {
-            extractor.release()
+        awaitClose {
+            FFmpegKit.cancel(session.sessionId)
         }
     }.flowOn(Dispatchers.IO)
 }

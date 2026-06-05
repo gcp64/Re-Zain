@@ -68,6 +68,9 @@ dependencies {
     implementation(libs.androidx.media3.effect)
     implementation(libs.androidx.media3.common)
 
+    // FFmpegKit (Advanced Video/Image offline processing)
+    implementation(libs.ffmpeg.kit.full)
+
     // WorkManager (Background execution)
     implementation(libs.androidx.work.runtime.ktx)
 
