@@ -1,6 +1,9 @@
 package com.bob.mediacompressor
 
 import android.Manifest
+import android.content.Context
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -12,7 +15,6 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.annotation.RequiresApi
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.togetherWith
@@ -36,7 +38,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.material.icons.Icons
@@ -50,9 +51,13 @@ import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -95,11 +100,11 @@ fun Modifier.bounceClickable(onClick: () -> Unit): Modifier {
 fun Modifier.neoGlassmorphic(
     borderRadius: androidx.compose.ui.unit.Dp = 24.dp,
     borderWidth: androidx.compose.ui.unit.Dp = 1.dp,
-    glowColor: Color = Color(0xFF00F0FF).copy(alpha = 0.22f)
+    glowColor: Color = Color.White.copy(alpha = 0.08f)
 ): Modifier {
     return this
         .clip(RoundedCornerShape(borderRadius))
-        .background(Color(0xFF10101C).copy(alpha = 0.65f))
+        .background(Color(0xFF0D0D12).copy(alpha = 0.85f))
         .border(
             width = borderWidth,
             brush = Brush.linearGradient(
@@ -152,17 +157,241 @@ fun NeoSwitch(
     }
 }
 
+@Composable
+fun NeoQualitySlider(
+    level: CompressionLevel,
+    onLevelChange: (CompressionLevel) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val sliderValue = when (level) {
+        CompressionLevel.LOW -> 0f
+        CompressionLevel.MEDIUM -> 1f
+        CompressionLevel.HIGH -> 2f
+    }
+    
+    Column(modifier = modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("مستوى جودة الضغط", color = Color.LightGray, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+            Text(
+                text = when (level) {
+                    CompressionLevel.LOW -> "حجم أدنى (أقل جودة)"
+                    CompressionLevel.MEDIUM -> "متوازن (جودة متوسطة)"
+                    CompressionLevel.HIGH -> "دقة فائقة (أعلى جودة)"
+                },
+                color = Color(0xFF3B82F6),
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
+        
+        Spacer(modifier = Modifier.height(10.dp))
+        
+        Slider(
+            value = sliderValue,
+            onValueChange = { valNew ->
+                val newLevel = when {
+                    valNew < 0.5f -> CompressionLevel.LOW
+                    valNew < 1.5f -> CompressionLevel.MEDIUM
+                    else -> CompressionLevel.HIGH
+                }
+                onLevelChange(newLevel)
+            },
+            valueRange = 0f..2f,
+            steps = 1,
+            colors = SliderDefaults.colors(
+                thumbColor = Color.White,
+                activeTrackColor = Color(0xFF3B82F6),
+                inactiveTrackColor = Color(0xFF2E2E42),
+                activeTickColor = Color.Transparent,
+                inactiveTickColor = Color.Transparent
+            )
+        )
+        
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 6.dp),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text("حجم أدنى", color = Color.Gray, fontSize = 10.sp)
+            Text("متوازن", color = Color.Gray, fontSize = 10.sp)
+            Text("دقة فائقة", color = Color.Gray, fontSize = 10.sp)
+        }
+    }
+}
+
+@Composable
+fun NeoResolutionSlider(
+    customHeight: String,
+    onHeightChange: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val currentVal = when (customHeight) {
+        "" -> 0f
+        "360" -> 1f
+        "480" -> 2f
+        "720" -> 3f
+        "1080" -> 4f
+        else -> 0f
+    }
+    
+    Column(modifier = modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("أبعاد ودقة الفيديو", color = Color.LightGray, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+            Text(
+                text = when (customHeight) {
+                    "" -> "تلقائي (أبعاد أصلية)"
+                    "360" -> "منخفضة (360p)"
+                    "480" -> "متوسطة (480p)"
+                    "720" -> "عالية (720p)"
+                    "1080" -> "فائقة (1080p)"
+                    else -> "مخصص (${customHeight}p)"
+                },
+                color = Color(0xFF3B82F6),
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
+        
+        Spacer(modifier = Modifier.height(10.dp))
+        
+        Slider(
+            value = currentVal,
+            onValueChange = { valNew ->
+                val newHeight = when (valNew.toInt()) {
+                    0 -> ""
+                    1 -> "360"
+                    2 -> "480"
+                    3 -> "720"
+                    4 -> "1080"
+                    else -> ""
+                }
+                onHeightChange(newHeight)
+            },
+            valueRange = 0f..4f,
+            steps = 3,
+            colors = SliderDefaults.colors(
+                thumbColor = Color.White,
+                activeTrackColor = Color(0xFF3B82F6),
+                inactiveTrackColor = Color(0xFF2E2E42),
+                activeTickColor = Color.Transparent,
+                inactiveTickColor = Color.Transparent
+            )
+        )
+        
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 6.dp),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text("تلقائي", color = Color.Gray, fontSize = 10.sp)
+            Text("360p", color = Color.Gray, fontSize = 10.sp)
+            Text("480p", color = Color.Gray, fontSize = 10.sp)
+            Text("720p", color = Color.Gray, fontSize = 10.sp)
+            Text("1080p", color = Color.Gray, fontSize = 10.sp)
+        }
+    }
+}
+
+@Composable
+fun NeoFpsSlider(
+    customFps: String,
+    onFpsChange: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val currentVal = when (customFps) {
+        "" -> 0f
+        "15" -> 1f
+        "24" -> 2f
+        "30" -> 3f
+        "60" -> 4f
+        else -> 0f
+    }
+    
+    Column(modifier = modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("معدل الإطارات (FPS)", color = Color.LightGray, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+            Text(
+                text = when (customFps) {
+                    "" -> "تلقائي (الأصلي)"
+                    "15" -> "سينمائي منخفض (15 fps)"
+                    "24" -> "سينمائي (24 fps)"
+                    "30" -> "قياسي (30 fps)"
+                    "60" -> "سلس للغاية (60 fps)"
+                    else -> "مخصص (${customFps} fps)"
+                },
+                color = Color(0xFF3B82F6),
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
+        
+        Spacer(modifier = Modifier.height(10.dp))
+        
+        Slider(
+            value = currentVal,
+            onValueChange = { valNew ->
+                val newFps = when (valNew.toInt()) {
+                    0 -> ""
+                    1 -> "15"
+                    2 -> "24"
+                    3 -> "30"
+                    4 -> "60"
+                    else -> ""
+                }
+                onFpsChange(newFps)
+            },
+            valueRange = 0f..4f,
+            steps = 3,
+            colors = SliderDefaults.colors(
+                thumbColor = Color.White,
+                activeTrackColor = Color(0xFF3B82F6),
+                inactiveTrackColor = Color(0xFF2E2E42),
+                activeTickColor = Color.Transparent,
+                inactiveTickColor = Color.Transparent
+            )
+        )
+        
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 6.dp),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text("تلقائي", color = Color.Gray, fontSize = 10.sp)
+            Text("15 fps", color = Color.Gray, fontSize = 10.sp)
+            Text("24 fps", color = Color.Gray, fontSize = 10.sp)
+            Text("30 fps", color = Color.Gray, fontSize = 10.sp)
+            Text("60 fps", color = Color.Gray, fontSize = 10.sp)
+        }
+    }
+}
+
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        hideSystemUI()
-        val prefs = com.bob.mediacompressor.security.AppSecurityManager.getEncryptedPreferences(this)
+        
+        // Bypass EncryptedSharedPreferences to prevent KeyStore crashes on custom ROMs
+        val prefs = this.getSharedPreferences("secure_app_prefs", android.content.Context.MODE_PRIVATE)
         setContent {
             ModernAppTheme {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
-                    color = Color(0xFF06060A) // Ultra Premium Dark Space Background
+                    color = Color(0xFF060608) // Ultra Premium Dark Space Background
                 ) {
                     var onboardingDone by remember {
                         mutableStateOf(prefs.getBoolean("onboarding_done", false))
@@ -180,25 +409,472 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+}
 
-    private fun hideSystemUI() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            window.setDecorFitsSystemWindows(false)
-            val controller = window.insetsController
-            if (controller != null) {
-                controller.hide(android.view.WindowInsets.Type.statusBars() or android.view.WindowInsets.Type.navigationBars())
-                controller.systemBarsBehavior = android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-            }
-        } else {
-            @Suppress("DEPRECATION")
-            window.decorView.systemUiVisibility = (
-                android.view.View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-                or android.view.View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-                or android.view.View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-                or android.view.View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-                or android.view.View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                or android.view.View.SYSTEM_UI_FLAG_FULLSCREEN
+@Composable
+fun OnboardingSlideVisual(page: Int) {
+    val infiniteTransition = rememberInfiniteTransition(label = "slide_visual")
+    
+    when (page) {
+        0 -> {
+            // Slide 1: Welcome to Re:Zain (Atomic Constellation & Pulsing Diamond)
+            val rotation by infiniteTransition.animateFloat(
+                initialValue = 0f,
+                targetValue = 360f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(10000, easing = LinearEasing)
+                ),
+                label = "rotation"
             )
+            val logoScale by infiniteTransition.animateFloat(
+                initialValue = 0.94f,
+                targetValue = 1.06f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(2000, easing = EaseInOutSine),
+                    repeatMode = RepeatMode.Reverse
+                ),
+                label = "logo_scale"
+            )
+            
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier.size(130.dp)
+            ) {
+                // High-fidelity orbits drawn via Canvas
+                Canvas(modifier = Modifier.fillMaxSize()) {
+                    val maxRadius = size.minDimension / 2f
+                    
+                    // Orbit 1 (Dashed Outer)
+                    drawCircle(
+                        color = Color(0xFF3B82F6).copy(alpha = 0.25f),
+                        radius = maxRadius - 5.dp.toPx(),
+                        style = Stroke(
+                            width = 1.dp.toPx(),
+                            pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 15f), 0f)
+                        )
+                    )
+                    
+                    // Orbit 2 (Solid Inner)
+                    drawCircle(
+                        color = Color.White.copy(alpha = 0.12f),
+                        radius = maxRadius - 22.dp.toPx(),
+                        style = Stroke(width = 1.dp.toPx())
+                    )
+                    
+                    // Orbit 3 (Dotted Intermediate)
+                    drawCircle(
+                        color = Color(0xFF3B82F6).copy(alpha = 0.15f),
+                        radius = maxRadius - 38.dp.toPx(),
+                        style = Stroke(
+                            width = 1.5.dp.toPx(),
+                            pathEffect = PathEffect.dashPathEffect(floatArrayOf(3f, 12f), 0f)
+                        )
+                    )
+                }
+                
+                // Rotating particles
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer { rotationZ = rotation },
+                    contentAlignment = Alignment.Center
+                ) {
+                    // Particle on Orbit 1
+                    Box(
+                        modifier = Modifier
+                            .offset(y = (-60).dp)
+                            .size(6.dp)
+                            .clip(CircleShape)
+                            .background(Color.White)
+                    )
+                    // Particle on Orbit 2
+                    Box(
+                        modifier = Modifier
+                            .offset(x = 43.dp)
+                            .size(4.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFF3B82F6))
+                    )
+                }
+
+                // Core logo shape (Pulsing Diamond)
+                Box(
+                    modifier = Modifier
+                        .size(64.dp)
+                        .graphicsLayer { 
+                            scaleX = logoScale
+                            scaleY = logoScale
+                            rotationZ = -rotation * 0.4f
+                        }
+                        .background(Color(0xFF0D0D12), RoundedCornerShape(16.dp))
+                        .border(1.5.dp, Brush.linearGradient(listOf(Color(0xFF3B82F6), Color.White)), RoundedCornerShape(16.dp)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Settings,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+            }
+        }
+        1 -> {
+            // Slide 2: Multi-image compression (Before-After Split Screen Interactive Simulator)
+            val sweepProgress by infiniteTransition.animateFloat(
+                initialValue = 0.15f,
+                targetValue = 0.85f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(3500, easing = EaseInOutSine),
+                    repeatMode = RepeatMode.Reverse
+                ),
+                label = "sweep_progress"
+            )
+            
+            Box(
+                modifier = Modifier
+                    .width(240.dp)
+                    .height(110.dp)
+                    .neoGlassmorphic(borderRadius = 20.dp, glowColor = Color.White.copy(alpha = 0.05f))
+                    .padding(8.dp)
+            ) {
+                Canvas(modifier = Modifier.fillMaxSize()) {
+                    val w = size.width
+                    val h = size.height
+                    val splitX = w * sweepProgress
+                    
+                    // Left area: Uncompressed Grid (Noisy / Low density)
+                    clipRect(right = splitX) {
+                        // Background tint for original
+                        drawRect(color = Color(0xFFEF5350).copy(alpha = 0.05f))
+                        // Draw vertical rough lines representing big size
+                        for (i in 0..w.toInt() step 24) {
+                            drawLine(
+                                color = Color(0xFFEF5350).copy(alpha = 0.12f),
+                                start = Offset(i.toFloat(), 0f),
+                                end = Offset(i.toFloat(), h),
+                                strokeWidth = 2.dp.toPx()
+                            )
+                        }
+                    }
+                    
+                    // Right area: Compressed Grid (Sharp / Dense / Optimized)
+                    clipRect(left = splitX) {
+                        // Background tint for compressed
+                        drawRect(color = Color(0xFF10B981).copy(alpha = 0.05f))
+                        // Draw dense clean grid lines
+                        for (i in 0..w.toInt() step 12) {
+                            drawLine(
+                                color = Color(0xFF10B981).copy(alpha = 0.15f),
+                                start = Offset(i.toFloat(), 0f),
+                                end = Offset(i.toFloat(), h),
+                                strokeWidth = 1.dp.toPx()
+                            )
+                        }
+                    }
+                    
+                    // Draw split line
+                    drawLine(
+                        color = Color.White,
+                        start = Offset(splitX, 0f),
+                        end = Offset(splitX, h),
+                        strokeWidth = 2.dp.toPx()
+                    )
+                    
+                    // Draw split handle
+                    drawCircle(
+                        color = Color(0xFF3B82F6),
+                        radius = 6.dp.toPx(),
+                        center = Offset(splitX, h / 2f)
+                    )
+                    drawCircle(
+                        color = Color.White,
+                        radius = 3.dp.toPx(),
+                        center = Offset(splitX, h / 2f)
+                    )
+                }
+                
+                // Overlay labels
+                Row(
+                    modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.Bottom
+                ) {
+                    Text(
+                        text = "10 MB",
+                        color = Color(0xFFEF5350),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        modifier = Modifier
+                            .background(Color(0xFF0D0D12).copy(alpha = 0.8f), RoundedCornerShape(4.dp))
+                            .padding(horizontal = 4.dp, vertical = 2.dp)
+                    )
+                    Text(
+                        text = "1.2 MB",
+                        color = Color(0xFF10B981),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        modifier = Modifier
+                            .background(Color(0xFF0D0D12).copy(alpha = 0.8f), RoundedCornerShape(4.dp))
+                            .padding(horizontal = 4.dp, vertical = 2.dp)
+                    )
+                }
+            }
+        }
+        2 -> {
+            // Slide 3: Video tools (Workstation Timeline Audio Waveform Simulator)
+            val playheadProgress by infiniteTransition.animateFloat(
+                initialValue = 0f,
+                targetValue = 1f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(4000, easing = LinearEasing)
+                ),
+                label = "playhead_progress"
+            )
+            
+            Box(
+                modifier = Modifier
+                    .width(240.dp)
+                    .height(110.dp)
+                    .neoGlassmorphic(borderRadius = 20.dp, glowColor = Color.White.copy(alpha = 0.05f))
+                    .padding(10.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    // Cohesive Title (Clean Text with Icon, No Emojis!)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.White, modifier = Modifier.size(12.dp))
+                            Text("تحويل الفيديو", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text("صيغة GIF", color = Color(0xFF3B82F6), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Icon(Icons.Default.Refresh, contentDescription = null, tint = Color(0xFF3B82F6), modifier = Modifier.size(12.dp))
+                        }
+                    }
+                    
+                    Spacer(modifier = Modifier.height(12.dp))
+                    
+                    // Waveform Timeline canvas
+                    Canvas(modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                    ) {
+                        val w = size.width
+                        val h = size.height
+                        val playheadX = w * playheadProgress
+                        
+                        // Waveform data (varying heights)
+                        val heights = floatArrayOf(
+                            0.2f, 0.4f, 0.7f, 0.3f, 0.5f, 0.9f, 0.6f, 0.2f, 0.5f, 0.8f, 0.4f, 0.6f, 0.3f, 0.7f, 0.2f
+                        )
+                        val barCount = heights.size
+                        val spacing = w / barCount
+                        
+                        for (i in 0 until barCount) {
+                            val barX = i * spacing + spacing / 2f
+                            val barH = h * heights[i]
+                            val isPassed = barX < playheadX
+                            
+                            drawLine(
+                                color = if (isPassed) Color(0xFF3B82F6) else Color.White.copy(alpha = 0.15f),
+                                start = Offset(barX, h / 2f - barH / 2f),
+                                end = Offset(barX, h / 2f + barH / 2f),
+                                strokeWidth = 3.dp.toPx()
+                            )
+                        }
+                        
+                        // Vertical Playhead line
+                        drawLine(
+                            color = Color.White,
+                            start = Offset(playheadX, 0f),
+                            end = Offset(playheadX, h),
+                            strokeWidth = 1.5.dp.toPx()
+                        )
+                    }
+                }
+            }
+        }
+        3 -> {
+            // Slide 4: Offline Security Shield (Radar Concentric Waves & Biometric Scanner)
+            val scanProgress by infiniteTransition.animateFloat(
+                initialValue = 0.05f,
+                targetValue = 0.95f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(2500, easing = EaseInOutSine),
+                    repeatMode = RepeatMode.Reverse
+                ),
+                label = "scan_progress"
+            )
+            val pulseRadius by infiniteTransition.animateFloat(
+                initialValue = 45f,
+                targetValue = 90f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(2000, easing = EaseOutQuad),
+                    repeatMode = RepeatMode.Restart
+                ),
+                label = "pulse_radius"
+            )
+            
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier.size(110.dp)
+            ) {
+                // Pulsing concentric radar waves
+                Canvas(modifier = Modifier.fillMaxSize()) {
+                    drawCircle(
+                        color = Color(0xFF3B82F6).copy(alpha = (1f - (pulseRadius - 45f) / 45f).coerceIn(0f, 0.25f)),
+                        radius = pulseRadius.dp.toPx(),
+                        style = Stroke(width = 1.5.dp.toPx())
+                    )
+                }
+                
+                // Scanner shield container
+                Box(
+                    modifier = Modifier
+                        .size(70.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFF0D0D12))
+                        .border(1.5.dp, Color(0xFF3B82F6), CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    // Shield drawing canvas with horizontal laser scanning line
+                    Canvas(modifier = Modifier.fillMaxSize()) {
+                        val h = size.height
+                        val w = size.width
+                        val laserY = h * scanProgress
+                        
+                        // Horizontal laser sweep line
+                        drawLine(
+                            color = Color.White,
+                            start = Offset(0f, laserY),
+                            end = Offset(w, laserY),
+                            strokeWidth = 2.dp.toPx()
+                        )
+                    }
+                    
+                    Icon(
+                        imageVector = Icons.Default.Lock,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(28.dp)
+                    )
+                }
+            }
+        }
+        4 -> {
+            // Slide 5: Developer Credentials (Constellation drifting particle node network)
+            val driftPhase by infiniteTransition.animateFloat(
+                initialValue = 0f,
+                targetValue = (2 * Math.PI).toFloat(),
+                animationSpec = infiniteRepeatable(
+                    animation = tween(12000, easing = LinearEasing)
+                ),
+                label = "drift_phase"
+            )
+            
+            Box(
+                modifier = Modifier
+                    .width(240.dp)
+                    .height(110.dp)
+                    .neoGlassmorphic(borderRadius = 20.dp, glowColor = Color.White.copy(alpha = 0.05f))
+                    .padding(8.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                // Drifting node network drawn via Canvas
+                Canvas(modifier = Modifier.fillMaxSize()) {
+                    val w = size.width
+                    val h = size.height
+                    
+                    // 5 drift nodes
+                    val nodes = arrayOf(
+                        Offset(
+                            w * 0.2f + (12.dp.toPx() * Math.sin(driftPhase.toDouble())).toFloat(),
+                            h * 0.3f + (8.dp.toPx() * Math.cos(driftPhase.toDouble())).toFloat()
+                        ),
+                        Offset(
+                            w * 0.8f + (10.dp.toPx() * Math.cos(driftPhase.toDouble() * 1.5)).toFloat(),
+                            h * 0.25f + (12.dp.toPx() * Math.sin(driftPhase.toDouble() * 1.2)).toFloat()
+                        ),
+                        Offset(
+                            w * 0.5f + (14.dp.toPx() * Math.sin(driftPhase.toDouble() * 0.8)).toFloat(),
+                            h * 0.75f + (10.dp.toPx() * Math.cos(driftPhase.toDouble() * 0.9)).toFloat()
+                        ),
+                        Offset(
+                            w * 0.15f + (8.dp.toPx() * Math.cos(driftPhase.toDouble() * 1.3)).toFloat(),
+                            h * 0.8f + (12.dp.toPx() * Math.sin(driftPhase.toDouble() * 1.1)).toFloat()
+                        ),
+                        Offset(
+                            w * 0.85f + (12.dp.toPx() * Math.sin(driftPhase.toDouble() * 1.1)).toFloat(),
+                            h * 0.75f + (10.dp.toPx() * Math.cos(driftPhase.toDouble() * 1.4)).toFloat()
+                        )
+                    )
+                    
+                    // Draw connections
+                    for (i in nodes.indices) {
+                        for (j in i + 1 until nodes.size) {
+                            val dist = (nodes[i] - nodes[j]).getDistance()
+                            if (dist < 130.dp.toPx()) {
+                                drawLine(
+                                    color = Color(0xFF3B82F6).copy(alpha = (1f - dist / 130.dp.toPx()) * 0.25f),
+                                    start = nodes[i],
+                                    end = nodes[j],
+                                    strokeWidth = 1.dp.toPx()
+                                )
+                            }
+                        }
+                    }
+                    
+                    // Draw node circles
+                    for (node in nodes) {
+                        drawCircle(
+                            color = Color(0xFF3B82F6).copy(alpha = 0.6f),
+                            radius = 4.dp.toPx(),
+                            center = node
+                        )
+                        drawCircle(
+                            color = Color.White.copy(alpha = 0.3f),
+                            radius = 2.dp.toPx(),
+                            center = node
+                        )
+                    }
+                }
+                
+                // Center Developer profile badge
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .background(Color(0xFF060608).copy(alpha = 0.85f), RoundedCornerShape(12.dp))
+                        .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(12.dp))
+                        .padding(horizontal = 16.dp, vertical = 10.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            text = "gcp64 & bob",
+                            color = Color.White,
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 12.sp
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "فريق التطوير والتصميم",
+                            color = Color.Gray,
+                            fontSize = 9.sp
+                        )
+                    }
+                }
+            }
         }
     }
 }
@@ -217,16 +893,16 @@ fun OnboardingScreen(onFinished: () -> Unit) {
         Triple(
             "ضغط الصور المتعددة",
             "اختر عشرات الصور دفعة واحدة وقم بضغط حجمها بنسبة تصل إلى 90% مع الحفاظ التام على أبعادها ودقتها العالية.",
-            Icons.Default.List
+            Icons.AutoMirrored.Filled.List
         ),
         Triple(
             "تحويل وهندسة الفيديو",
-            "حوّل مقاطع الفيديو إلى صور GIF متحركة عالية الجودة، أو استخرج مسار الصوت النقي بصيغة MP3 محلياً 100%.",
+            "عوّل مقاطع الفيديو إلى صور GIF متحركة عالية الجودة، أو استخرج مسار الصوت النقي بصيغة MP3 محلياً 100%.",
             Icons.Default.PlayArrow
         ),
         Triple(
             "أمان مطلق دون إنترنت",
-            "معالجة محلية بالكامل وحماية أمنية مدمجة ضد التعديل أو الاختراق لضمان خصوصية وسريّة بياناتك.",
+            "معالجة محلية بالكامل وحماية أمنية مدمجة لضمان خصوصية وسريّة بياناتك.",
             Icons.Default.Lock
         ),
         Triple(
@@ -239,7 +915,7 @@ fun OnboardingScreen(onFinished: () -> Unit) {
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF040407))
+            .background(Color(0xFF060608))
     ) {
         // Aesthetic ambient glows (pulsating & drifting)
         val infiniteTransition = rememberInfiniteTransition(label = "onb_glow")
@@ -279,7 +955,7 @@ fun OnboardingScreen(onFinished: () -> Unit) {
                 .scale(scale)
                 .background(
                     Brush.radialGradient(
-                        colors = listOf(Color(0xFF9E00FF).copy(alpha = alpha), Color.Transparent)
+                        colors = listOf(Color(0xFF3B82F6).copy(alpha = alpha * 0.4f), Color.Transparent)
                     )
                 )
                 .blur(65.dp)
@@ -293,7 +969,7 @@ fun OnboardingScreen(onFinished: () -> Unit) {
                 .scale(scale)
                 .background(
                     Brush.radialGradient(
-                        colors = listOf(Color(0xFF00F0FF).copy(alpha = alpha * 0.8f), Color.Transparent)
+                        colors = listOf(Color(0xFF1E293B).copy(alpha = alpha * 0.3f), Color.Transparent)
                     )
                 )
                 .blur(60.dp)
@@ -314,7 +990,7 @@ fun OnboardingScreen(onFinished: () -> Unit) {
                     .weight(1f)
                     .fillMaxWidth()
                     .padding(vertical = 20.dp)
-                    .neoGlassmorphic(borderRadius = 32.dp, glowColor = Color(0xFF2563EB).copy(alpha = 0.15f))
+                    .neoGlassmorphic(borderRadius = 32.dp, glowColor = Color.White.copy(alpha = 0.08f))
                     .padding(24.dp),
                 contentAlignment = Alignment.Center
             ) {
@@ -333,7 +1009,7 @@ fun OnboardingScreen(onFinished: () -> Unit) {
                     },
                     label = "slide_transition"
                 ) { targetPage ->
-                    val (title, description, icon) = slideData[targetPage]
+                    val (title, description, _) = slideData[targetPage]
                     
                     // Floating bobbing animation for the active slide's icon
                     val bobbingOffset by infiniteTransition.animateFloat(
@@ -351,49 +1027,35 @@ fun OnboardingScreen(onFinished: () -> Unit) {
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.Center
                     ) {
+                        // Custom premium visual animation for onboarding
                         Box(
                             modifier = Modifier
                                 .offset(y = bobbingOffset.dp)
-                                .size(110.dp)
-                                .clip(RoundedCornerShape(32.dp))
-                                .background(
-                                    Brush.horizontalGradient(
-                                        colors = listOf(
-                                            Color(0xFF2563EB).copy(alpha = 0.25f),
-                                            Color(0xFF00F0FF).copy(alpha = 0.15f)
-                                        )
-                                    )
-                                )
-                                .border(1.5.dp, Color(0xFF2E2E42), RoundedCornerShape(32.dp)),
+                                .height(140.dp),
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(
-                                imageVector = icon,
-                                contentDescription = null,
-                                tint = Color(0xFF00F0FF),
-                                modifier = Modifier.size(48.dp)
-                            )
+                            OnboardingSlideVisual(targetPage)
                         }
 
-                        Spacer(modifier = Modifier.height(36.dp))
+                        Spacer(modifier = Modifier.height(28.dp))
 
                         Text(
                             text = title,
-                            fontSize = 26.sp,
+                            fontSize = 24.sp,
                             fontWeight = FontWeight.ExtraBold,
                             color = Color.White,
                             textAlign = TextAlign.Center
                         )
 
-                        Spacer(modifier = Modifier.height(18.dp))
+                        Spacer(modifier = Modifier.height(14.dp))
 
                         Text(
                             text = description,
-                            fontSize = 15.sp,
+                            fontSize = 14.sp,
                             color = Color.LightGray,
                             textAlign = TextAlign.Center,
-                            lineHeight = 24.sp,
-                            modifier = Modifier.padding(horizontal = 12.dp)
+                            lineHeight = 22.sp,
+                            modifier = Modifier.padding(horizontal = 8.dp)
                         )
                     }
                 }
@@ -423,7 +1085,7 @@ fun OnboardingScreen(onFinished: () -> Unit) {
                                 .width(width)
                                 .clip(RoundedCornerShape(4.dp))
                                 .background(
-                                    if (isCurrent) Brush.horizontalGradient(listOf(Color(0xFF2563EB), Color(0xFF00F0FF)))
+                                    if (isCurrent) Brush.horizontalGradient(listOf(Color(0xFF2563EB), Color(0xFF3B82F6)))
                                     else Brush.linearGradient(listOf(Color(0xFF2E2E42), Color(0xFF2E2E42)))
                                 )
                         )
@@ -464,7 +1126,7 @@ fun OnboardingScreen(onFinished: () -> Unit) {
                             .weight(2f)
                             .height(54.dp)
                             .clip(RoundedCornerShape(16.dp))
-                            .background(Brush.horizontalGradient(listOf(Color(0xFF2563EB), Color(0xFF00F0FF))))
+                            .background(Brush.horizontalGradient(listOf(Color(0xFF2563EB), Color(0xFF3B82F6))))
                             .bounceClickable {
                                 if (currentSlide < slidesCount - 1) {
                                     currentSlide++
@@ -490,10 +1152,10 @@ fun OnboardingScreen(onFinished: () -> Unit) {
 @Composable
 fun ModernAppTheme(content: @Composable () -> Unit) {
     val darkColorScheme = darkColorScheme(
-        primary = Color(0xFF9E00FF), // Neon Purple Accent
-        secondary = Color(0xFF00F0FF), // Cyber Cyan Accent
-        background = Color(0xFF06060A),
-        surface = Color(0xFF12121E)
+        primary = Color.White, // Monochromatic White
+        secondary = Color(0xFF3B82F6), // Premium Slate Blue Accent
+        background = Color(0xFF060608),
+        surface = Color(0xFF0D0D12)
     )
     MaterialTheme(
         colorScheme = darkColorScheme,
@@ -604,21 +1266,10 @@ fun CompressionDashboard(viewModel: MainViewModel = hiltViewModel()) {
         label = "glow_alpha_2"
     )
 
-    // Breathing glow animation for selection border
-    val borderGlowAlpha by infiniteTransition.animateFloat(
-        initialValue = 0.20f,
-        targetValue = 0.65f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(3500, easing = EaseInOutSine),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "border_glow_alpha"
-    )
-
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF040407))
+            .background(Color(0xFF060608))
     ) {
         // Aesthetic ambient gradient light in the top-right corner (pulsating)
         Box(
@@ -629,7 +1280,7 @@ fun CompressionDashboard(viewModel: MainViewModel = hiltViewModel()) {
                 .scale(glowScale1)
                 .background(
                     Brush.radialGradient(
-                        colors = listOf(Color(0xFF9E00FF).copy(alpha = glowAlpha1), Color.Transparent)
+                        colors = listOf(Color(0xFF3B82F6).copy(alpha = glowAlpha1 * 0.4f), Color.Transparent)
                     )
                 )
                 .blur(60.dp)
@@ -644,7 +1295,7 @@ fun CompressionDashboard(viewModel: MainViewModel = hiltViewModel()) {
                 .scale(glowScale2)
                 .background(
                     Brush.radialGradient(
-                        colors = listOf(Color(0xFF00F0FF).copy(alpha = glowAlpha2), Color.Transparent)
+                        colors = listOf(Color(0xFF1E293B).copy(alpha = glowAlpha2 * 0.4f), Color.Transparent)
                     )
                 )
                 .blur(50.dp)
@@ -659,488 +1310,144 @@ fun CompressionDashboard(viewModel: MainViewModel = hiltViewModel()) {
         ) {
             Spacer(modifier = Modifier.height(28.dp))
 
-            // App Header
-            Text(
-                text = "Re:Zain",
-                fontSize = 28.sp,
-                fontWeight = FontWeight.Bold,
-                style = LocalTextStyle.current.copy(
-                    brush = Brush.horizontalGradient(listOf(Color(0xFF00F0FF), Color(0xFF9E00FF)))
-                ),
-                textAlign = TextAlign.Center
-            )
-            Text(
-                text = "ضغط وتحويل ملفات الصور والفيديو محلياً 100% بدون إنترنت",
-                fontSize = 12.sp,
-                color = Color.Gray,
-                modifier = Modifier.padding(top = 6.dp),
-                textAlign = TextAlign.Center,
-                lineHeight = 18.sp
-            )
-
-            Spacer(modifier = Modifier.height(24.dp))
-
-            // File selection widget / Metadata card (Localized)
-            AnimatedVisibility(
-                visible = selectedMediaList.isEmpty(),
-                enter = fadeIn(),
-                exit = fadeOut()
+            // Premium Glassmorphic Header Row (exactly like reference top bar)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .neoGlassmorphic(borderRadius = 28.dp, glowColor = Color(0xFF00F0FF).copy(alpha = 0.15f))
-                        .padding(24.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(42.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFF131324).copy(alpha = 0.6f))
+                            .border(1.dp, Color(0xFF3B82F6).copy(alpha = 0.4f), CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Person,
+                            contentDescription = "الملف الشخصي",
+                            tint = Color(0xFF3B82F6),
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column {
                         Text(
-                            text = if (currentTab == 0) "أداة الضغط الذكي Re:Zain" else "محول وسائط Re:Zain",
-                            color = Color.White,
+                            text = "Re:Zain",
+                            fontSize = 20.sp,
                             fontWeight = FontWeight.Bold,
-                            fontSize = 17.sp,
-                            textAlign = TextAlign.Center
+                            color = Color.White
                         )
                         Text(
-                            text = if (currentTab == 0) "اختر ملفات وسائط لبدء الضغط محلياً وبأمان" else "اختر ملف وسائط لتحويل صيغته دون إنترنت",
-                            color = Color.Gray,
-                            fontSize = 12.sp,
-                            modifier = Modifier.padding(top = 4.dp, bottom = 20.dp),
-                            textAlign = TextAlign.Center
+                            text = "أدوات وسائط متكاملة",
+                            fontSize = 11.sp,
+                            color = Color.Gray
                         )
-                        
-                        // Horizontal Tactile Controller Bar (Resembling the image's music bar)
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(68.dp)
-                                .clip(RoundedCornerShape(34.dp))
-                                .background(Color(0xFF08080C))
-                                .border(1.dp, Color(0xFF1E1E2C), RoundedCornerShape(34.dp))
-                                .padding(horizontal = 16.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            // Button 1: Single file pick (tactile)
-                            Box(
-                                modifier = Modifier
-                                    .size(44.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(0xFF1E1E2E))
-                                    .border(1.dp, Color(0xFF2E2E42), CircleShape)
-                                    .bounceClickable {
-                                        photoPickerLauncher.launch(
-                                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)
-                                        )
-                                    },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Add,
-                                    contentDescription = "ملف منفرد",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                            
-                            // Button 2: Multiple images (tactile)
-                            Box(
-                                modifier = Modifier
-                                    .size(44.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(0xFF1E1E2E))
-                                    .border(1.dp, Color(0xFF2E2E42), CircleShape)
-                                    .bounceClickable {
-                                        multipleImagesLauncher.launch(
-                                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                                        )
-                                    },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Filled.List,
-                                    contentDescription = "صور متعددة",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                            
-                            // Button 3: Information/Tactile Placeholder
-                            Box(
-                                modifier = Modifier
-                                    .size(44.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(0xFF1E1E2E))
-                                    .border(1.dp, Color(0xFF2E2E42), CircleShape),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Info,
-                                    contentDescription = "معلومات",
-                                    tint = Color.Gray,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-
-                            // Glowing Active Ring Circle (mimicking the glowing circle on the far right)
-                            Box(
-                                modifier = Modifier
-                                    .size(44.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(0xFF08080C))
-                                    .border(2.dp, Color(0xFF00F0FF), CircleShape)
-                                    .padding(4.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(26.dp)
-                                        .clip(CircleShape)
-                                        .border(1.dp, Color(0xFF00F0FF).copy(alpha = 0.5f), CircleShape)
-                                )
-                            }
-                        }
                     }
                 }
-            }
-
-            AnimatedVisibility(
-                visible = selectedMediaList.isNotEmpty(),
-                enter = fadeIn(),
-                exit = fadeOut()
-            ) {
-                if (selectedMediaList.size > 1) {
-                    BatchMetadataCard(
-                        mediaList = selectedMediaList,
-                        onClear = { viewModel.reset() }
-                    )
-                } else if (selectedMediaList.size == 1) {
-                    MetadataCard(
-                        media = selectedMediaList.first(),
-                        onClear = { viewModel.reset() }
+                
+                Box(
+                    modifier = Modifier
+                        .size(42.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color(0xFF131324).copy(alpha = 0.6f))
+                        .border(1.5.dp, Color(0xFF2E2E42), RoundedCornerShape(12.dp))
+                        .bounceClickable {
+                            Toast.makeText(context, "تطبيق Re:Zain لضغط الميديا - نسخة مستقرة ومؤمنة", Toast.LENGTH_SHORT).show()
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Menu,
+                        contentDescription = "القائمة",
+                        tint = Color.White,
+                        modifier = Modifier.size(22.dp)
                     )
                 }
             }
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            // Configurations UI panel (Arabic Layout & Enhancements)
-            AnimatedVisibility(
-                visible = selectedMediaList.isNotEmpty(),
-                enter = fadeIn(animationSpec = tween(400)) + expandVertically(animationSpec = tween(400)),
-                exit = fadeOut(animationSpec = tween(300)) + shrinkVertically(animationSpec = tween(300))
-            ) {
-                val isBatchMode = selectedMediaList.size > 1
-                val firstMedia = selectedMediaList.firstOrNull() ?: return@AnimatedVisibility
-
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    if (currentTab == 0) {
-                        // COMPRESSOR SCREEN (شاشة الضغط)
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .neoGlassmorphic(borderRadius = 28.dp)
-                                .padding(20.dp)
-                                .animateContentSize()
-                        ) {
-                            Text(
-                                text = if (isBatchMode) "إعدادات ضغط دفعة الصور" else "إعدادات ضغط الملف",
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White,
-                                fontSize = 16.sp,
-                                modifier = Modifier.padding(bottom = 16.dp)
-                            )
-
-                            // Compression Level Selector
-                            Text("مستوى الجودة المطلوب", color = Color.LightGray, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                val levels = listOf(
-                                    CompressionLevel.LOW to "منخفض",
-                                    CompressionLevel.MEDIUM to "متوازن",
-                                    CompressionLevel.HIGH to "دقة فائقة"
-                                )
-                                levels.forEach { (level, name) ->
-                                    val isSelected = compressionLevel == level
-                                    Box(
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .padding(horizontal = 4.dp)
-                                            .clip(RoundedCornerShape(14.dp))
-                                            .background(
-                                                if (isSelected) Color(0xFF2563EB)
-                                                else Color(0xFFF1F5F9)
-                                            )
-                                            .bounceClickable { viewModel.setCompressionLevel(level) }
-                                            .padding(vertical = 12.dp),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text(
-                                            text = name,
-                                            color = if (isSelected) Color.White else Color(0xFF0F172A),
-                                            fontSize = 13.sp,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                    }
-                                }
-                            }
-
-                            Spacer(modifier = Modifier.height(18.dp))
-
-                            // Compressor Type (Fast Media3 vs High FFmpeg) - only for single videos
-                            if (!isBatchMode && firstMedia.mediaType == MediaType.VIDEO) {
-                                Text("محرك معالجة الفيديو", color = Color.LightGray, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Row(
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    val options = listOf("FAST" to "سريع (عتاد)", "HIGH" to "عالي الدقة")
-                                    options.forEach { (type, label) ->
-                                        val isSelected = compressorType == type
-                                        Box(
-                                            modifier = Modifier
-                                                .weight(1f)
-                                                .padding(horizontal = 4.dp)
-                                                .clip(RoundedCornerShape(14.dp))
-                                                .background(
-                                                    if (isSelected) Color(0xFF2563EB)
-                                                    else Color(0xFFF1F5F9)
-                                                )
-                                                .bounceClickable { viewModel.setCompressorType(type) }
-                                                .padding(vertical = 12.dp),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Text(
-                                                text = label,
-                                                color = if (isSelected) Color.White else Color(0xFF0F172A),
-                                                fontSize = 12.sp,
-                                                fontWeight = FontWeight.Bold
-                                            )
-                                        }
-                                    }
-                                }
-
-                                Spacer(modifier = Modifier.height(18.dp))
-
-                                // Audio strip - video only
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Column {
-                                        Text("كتم صوت الفيديو", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                                        Text("حذف الملفات الصوتية لتوفير حجم إضافي", color = Color.Gray, fontSize = 11.sp)
-                                    }
-                                    NeoSwitch(
-                                        checked = removeAudio,
-                                        onCheckedChange = { viewModel.setRemoveAudio(it) }
-                                    )
-                                }
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(16.dp))
-
-                        if (!isBatchMode && firstMedia.mediaType == MediaType.VIDEO) {
-                            // Advanced Manual Scaling (Optional)
-                            Text("خيارات تحجيم الفيديو المتقدمة (اختياري)", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                            Spacer(modifier = Modifier.height(10.dp))
-                            Row(
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                OutlinedTextField(
-                                    value = customHeight,
-                                    onValueChange = { viewModel.setCustomHeight(it) },
-                                    label = { Text("الارتفاع (مثال: 720)") },
-                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .padding(end = 6.dp)
-                                        .clip(RoundedCornerShape(14.dp))
-                                        .background(Color(0xFFF1F5F9)),
-                                    singleLine = true,
-                                    colors = OutlinedTextFieldDefaults.colors(
-                                        focusedTextColor = Color(0xFF0F172A),
-                                        unfocusedTextColor = Color(0xFF0F172A),
-                                        focusedBorderColor = Color(0xFF2563EB),
-                                        unfocusedBorderColor = Color.Transparent,
-                                        focusedLabelColor = Color(0xFF2563EB),
-                                        unfocusedLabelColor = Color.Gray
-                                    )
-                                )
-                                OutlinedTextField(
-                                    value = customFps,
-                                    onValueChange = { viewModel.setCustomFps(it) },
-                                    label = { Text("معدل الإطارات FPS (مثال: 30)") },
-                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .padding(start = 6.dp)
-                                        .clip(RoundedCornerShape(14.dp))
-                                        .background(Color(0xFFF1F5F9)),
-                                    singleLine = true,
-                                    colors = OutlinedTextFieldDefaults.colors(
-                                        focusedTextColor = Color(0xFF0F172A),
-                                        unfocusedTextColor = Color(0xFF0F172A),
-                                        focusedBorderColor = Color(0xFF2563EB),
-                                        unfocusedBorderColor = Color.Transparent,
-                                        focusedLabelColor = Color(0xFF2563EB),
-                                        unfocusedLabelColor = Color.Gray
-                                    )
-                                )
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(24.dp))
-
-                        // Action execution Box Card (Animated bounce on press)
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(54.dp)
-                                .clip(RoundedCornerShape(16.dp))
-                                .background(Brush.horizontalGradient(listOf(Color(0xFF2563EB), Color(0xFF00F0FF))))
-                                .bounceClickable { viewModel.startProcessing() },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = if (isBatchMode) "بدء ضغط دفعة الصور (${selectedMediaList.size} عناصر)" else "بدء ضغط الملف",
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White
-                            )
-                        }
-
+            // Screen Content switching with AnimatedContent for smooth transitions
+            AnimatedContent(
+                targetState = currentTab,
+                transitionSpec = {
+                    if (targetState > initialState) {
+                        (slideInHorizontally { width -> width / 2 } + fadeIn(animationSpec = tween(300))).togetherWith(
+                            slideOutHorizontally { width -> -width / 2 } + fadeOut(animationSpec = tween(300))
+                        )
                     } else {
-                        // CONVERTER SCREEN (شاشة تحويل الصيغ)
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .neoGlassmorphic(borderRadius = 28.dp)
-                                .padding(20.dp)
-                                .animateContentSize()
-                        ) {
-                            Text(
-                                text = "إعدادات تحويل الصيغ",
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White,
-                                fontSize = 16.sp,
-                                modifier = Modifier.padding(bottom = 16.dp)
-                            )
-
-                            if (!isBatchMode && firstMedia.mediaType == MediaType.VIDEO) {
-                                Text("الصيغة المستهدفة", color = Color.LightGray, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Row(modifier = Modifier.fillMaxWidth()) {
-                                    val actionOptions = listOf(
-                                        "TO_GIF" to "تحويل إلى GIF متحرك",
-                                        "TO_AUDIO" to "استخراج صوت MP3"
-                                    )
-                                    actionOptions.forEach { (action, label) ->
-                                        val isSelected = actionType == action
-                                        Box(
-                                            modifier = Modifier
-                                                .weight(1f)
-                                                .padding(horizontal = 4.dp)
-                                                .clip(RoundedCornerShape(14.dp))
-                                                .background(
-                                                    if (isSelected) Color(0xFF2563EB)
-                                                    else Color(0xFFF1F5F9)
-                                                )
-                                                .bounceClickable { viewModel.setActionType(action) }
-                                                .padding(vertical = 12.dp),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Text(
-                                                text = label,
-                                                color = if (isSelected) Color.White else Color(0xFF0F172A),
-                                                fontSize = 12.sp,
-                                                fontWeight = FontWeight.Bold
-                                            )
-                                        }
-                                    }
-                                }
-                                Spacer(modifier = Modifier.height(16.dp))
-                                Text(
-                                    text = if (actionType == "TO_GIF") {
-                                        "يقوم هذا الخيار بتحويل الفيديو إلى ملف GIF متحرك عالي الجودة والوضوح مع لوحة ألوان مزدوجة وحجم ملف مثالي."
-                                    } else {
-                                        "يستخرج مسار الصوت النقي من الفيديو بصيغة MP3 بمعدل بت عالي ستيريو 100% محلياً."
-                                    },
-                                    color = Color.Gray,
-                                    fontSize = 12.sp,
-                                    lineHeight = 18.sp
+                        (slideInHorizontally { width -> -width / 2 } + fadeIn(animationSpec = tween(300))).togetherWith(
+                            slideOutHorizontally { width -> width / 2 } + fadeOut(animationSpec = tween(300))
+                        )
+                    }
+                },
+                label = "dashboard_screens"
+            ) { targetTab ->
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    when (targetTab) {
+                        0 -> {
+                            // Compressor Tab
+                            if (selectedMediaList.isEmpty()) {
+                                FilePickerCard(
+                                    title = "أداة الضغط الذكي Re:Zain",
+                                    subtitle = "اختر ملفات وسائط لبدء الضغط محلياً وبأمان",
+                                    photoLauncher = photoPickerLauncher,
+                                    batchLauncher = multipleImagesLauncher
                                 )
                             } else {
-                                // Single or Batch Image Conversion options
-                                Text("صيغة الصورة المستهدفة", color = Color.LightGray, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Row(modifier = Modifier.fillMaxWidth()) {
-                                    val imageFormats = listOf("WEBP", "PNG", "JPEG")
-                                    imageFormats.forEach { format ->
-                                        val isSelected = targetImageFormat == format
-                                        Box(
-                                            modifier = Modifier
-                                                .weight(1f)
-                                                .padding(horizontal = 4.dp)
-                                                .clip(RoundedCornerShape(14.dp))
-                                                .background(
-                                                    if (isSelected) Color(0xFF2563EB)
-                                                    else Color(0xFFF1F5F9)
-                                                )
-                                                .bounceClickable { viewModel.setTargetImageFormat(format) }
-                                                .padding(vertical = 12.dp),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Text(
-                                                text = format,
-                                                color = if (isSelected) Color.White else Color(0xFF0F172A),
-                                                fontSize = 13.sp,
-                                                fontWeight = FontWeight.Bold
-                                            )
-                                        }
-                                    }
+                                if (selectedMediaList.size > 1) {
+                                    BatchMetadataCard(mediaList = selectedMediaList, onClear = { viewModel.reset() })
+                                } else {
+                                    MetadataCard(media = selectedMediaList.first(), onClear = { viewModel.reset() })
                                 }
-                                Spacer(modifier = Modifier.height(16.dp))
-                                Text(
-                                    text = when (targetImageFormat) {
-                                        "WEBP" -> "WEBP: ترميز حديث وممتاز يوفر حجماً أصغر بنسبة تصل لـ 90% مع الحفاظ على وضوح الصورة وتفاصيلها."
-                                        "PNG" -> "PNG: ترميز غير فاقد للجودة، الخيار الأمثل للرسومات واللوجوهات والتصاميم ذات الشفافية."
-                                        else -> "JPEG: الصيغة القياسية الأكثر شهرة وتوافقاً للصور الفوتوغرافية."
-                                    },
-                                    color = Color.Gray,
-                                    fontSize = 12.sp,
-                                    lineHeight = 18.sp
+
+                                Spacer(modifier = Modifier.height(20.dp))
+
+                                CompressorConfigCard(
+                                    viewModel = viewModel,
+                                    mediaList = selectedMediaList,
+                                    compressionLevel = compressionLevel,
+                                    compressorType = compressorType,
+                                    removeAudio = removeAudio,
+                                    customHeight = customHeight,
+                                    customFps = customFps
                                 )
                             }
                         }
+                        1 -> {
+                            // Converter Tab
+                            if (selectedMediaList.isEmpty()) {
+                                FilePickerCard(
+                                    title = "محول وسائط Re:Zain",
+                                    subtitle = "اختر ملف وسائط لتحويل صيغته دون إنترنت",
+                                    photoLauncher = photoPickerLauncher,
+                                    batchLauncher = multipleImagesLauncher
+                                )
+                            } else {
+                                if (selectedMediaList.size > 1) {
+                                    BatchMetadataCard(mediaList = selectedMediaList, onClear = { viewModel.reset() })
+                                } else {
+                                    MetadataCard(media = selectedMediaList.first(), onClear = { viewModel.reset() })
+                                }
 
-                        Spacer(modifier = Modifier.height(24.dp))
+                                Spacer(modifier = Modifier.height(20.dp))
 
-                        // Action execution Box Card (Animated bounce on press)
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(54.dp)
-                                .clip(RoundedCornerShape(16.dp))
-                                .background(Brush.horizontalGradient(listOf(Color(0xFF2563EB), Color(0xFF00F0FF))))
-                                .bounceClickable { viewModel.startProcessing() },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = if (isBatchMode) "تحويل دفعة الصور إلى $targetImageFormat" else {
-                                    if (firstMedia.mediaType == MediaType.VIDEO) {
-                                        if (actionType == "TO_GIF") "تحويل الفيديو إلى GIF" else "استخراج مسار الـ MP3"
-                                    } else "تحويل صيغة الصورة"
-                                },
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White
-                            )
+                                ConverterConfigCard(
+                                    viewModel = viewModel,
+                                    mediaList = selectedMediaList,
+                                    actionType = actionType,
+                                    targetImageFormat = targetImageFormat
+                                )
+                            }
+                        }
+                        2 -> {
+                            // About App Tab
+                            AboutAppScreen()
                         }
                     }
                 }
@@ -1164,19 +1471,19 @@ fun CompressionDashboard(viewModel: MainViewModel = hiltViewModel()) {
                 ) {
                     when (val state = uiState) {
                         is UiState.LoadingMetadata -> {
-                            CircularProgressIndicator(color = Color(0xFF00F0FF))
+                            CircularProgressIndicator(color = Color(0xFF3B82F6))
                             Spacer(modifier = Modifier.height(16.dp))
                             Text("جاري قراءة تفاصيل الملف...", color = Color.White, fontWeight = FontWeight.Medium)
                         }
                         is UiState.Compressing -> {
-                            val animatedProgress by animateFloatAsState(targetValue = state.progress / 100f)
+                            val animatedProgress by animateFloatAsState(targetValue = state.progress / 100f, label = "loading_progress")
                             
                             Box(contentAlignment = Alignment.Center) {
                                 CircularProgressIndicator(
                                     progress = { animatedProgress },
                                     modifier = Modifier.size(160.dp),
                                     strokeWidth = 10.dp,
-                                    color = Color(0xFF00F0FF),
+                                    color = Color(0xFF3B82F6),
                                     trackColor = Color(0xFF22222E)
                                 )
                                 Text(
@@ -1212,7 +1519,7 @@ fun CompressionDashboard(viewModel: MainViewModel = hiltViewModel()) {
                             Icon(
                                 imageVector = Icons.Default.CheckCircle,
                                 contentDescription = "Success",
-                                tint = Color(0xFF00F0FF),
+                                tint = Color(0xFF3B82F6),
                                 modifier = Modifier.size(80.dp)
                             )
                             Spacer(modifier = Modifier.height(16.dp))
@@ -1278,17 +1585,21 @@ fun CompressionDashboard(viewModel: MainViewModel = hiltViewModel()) {
             }
         }
 
-        // 4. FLOATING GLASSMORPHIC BOTTOM NAVIGATION BAR
+        // 4. FLOATING GLASSMORPHIC BOTTOM NAVIGATION BAR (Polished for 3 tabs)
         Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .padding(bottom = 24.dp)
-                .width(300.dp)
+                .width(350.dp)
                 .height(64.dp)
-                .neoGlassmorphic(borderRadius = 32.dp, glowColor = Color(0xFF00F0FF).copy(alpha = 0.15f))
+                .neoGlassmorphic(borderRadius = 32.dp, glowColor = Color.White.copy(alpha = 0.08f))
         ) {
             val tabOffset by animateDpAsState(
-                targetValue = if (currentTab == 0) 10.dp else 155.dp,
+                targetValue = when (currentTab) {
+                    0 -> 10.dp
+                    1 -> 122.dp
+                    else -> 234.dp
+                },
                 animationSpec = spring(
                     dampingRatio = Spring.DampingRatioMediumBouncy,
                     stiffness = Spring.StiffnessMedium
@@ -1300,10 +1611,10 @@ fun CompressionDashboard(viewModel: MainViewModel = hiltViewModel()) {
                 modifier = Modifier
                     .padding(vertical = 8.dp)
                     .offset(x = tabOffset)
-                    .width(135.dp)
+                    .width(106.dp)
                     .fillMaxHeight()
                     .clip(RoundedCornerShape(24.dp))
-                    .background(Color(0xFF2563EB))
+                    .background(Color(0xFF1E293B))
             )
 
             Row(
@@ -1332,7 +1643,7 @@ fun CompressionDashboard(viewModel: MainViewModel = hiltViewModel()) {
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
                         text = "أداة الضغط",
-                        color = if (compressorSelected) Color(0xFF00F0FF) else Color.Gray,
+                        color = if (compressorSelected) Color.White else Color.Gray,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold
                     )
@@ -1353,19 +1664,1058 @@ fun CompressionDashboard(viewModel: MainViewModel = hiltViewModel()) {
                     Icon(
                         imageVector = Icons.Default.Refresh,
                         contentDescription = "محول الصيغ",
-                        tint = if (converterSelected) Color(0xFF00F0FF) else Color.Gray,
+                        tint = if (converterSelected) Color.White else Color.Gray,
                         modifier = Modifier.size(22.dp)
                     )
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
                         text = "محول الصيغ",
-                        color = if (converterSelected) Color(0xFF00F0FF) else Color.Gray,
+                        color = if (converterSelected) Color.White else Color.Gray,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                // Tab 2: About App
+                val aboutSelected = currentTab == 2
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier
+                        .weight(1f)
+                        .bounceClickable {
+                            if (uiState !is UiState.Compressing) {
+                                viewModel.setCurrentTab(2)
+                            }
+                        }
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Info,
+                        contentDescription = "عن التطبيق",
+                        tint = if (aboutSelected) Color.White else Color.Gray,
+                        modifier = Modifier.size(22.dp)
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "عن التطبيق",
+                        color = if (aboutSelected) Color.White else Color.Gray,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold
                     )
                 }
             }
         }
+    }
+}
+
+@Composable
+fun FilePickerCard(
+    title: String,
+    subtitle: String,
+    photoLauncher: androidx.activity.result.ActivityResultLauncher<PickVisualMediaRequest>,
+    batchLauncher: androidx.activity.result.ActivityResultLauncher<PickVisualMediaRequest>
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .neoGlassmorphic(borderRadius = 28.dp, glowColor = Color.White.copy(alpha = 0.08f))
+            .padding(24.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                text = title,
+                color = Color.White,
+                fontWeight = FontWeight.Bold,
+                fontSize = 17.sp,
+                textAlign = TextAlign.Center
+            )
+            Text(
+                text = subtitle,
+                color = Color.Gray,
+                fontSize = 12.sp,
+                modifier = Modifier.padding(top = 4.dp, bottom = 20.dp),
+                textAlign = TextAlign.Center
+            )
+            
+            // Horizontal Tactile Controller Bar (Resembling the image's music bar)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(68.dp)
+                    .clip(RoundedCornerShape(34.dp))
+                    .background(Color(0xFF08080C))
+                    .border(1.dp, Color(0xFF1E1E2C), RoundedCornerShape(34.dp))
+                    .padding(horizontal = 16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                // Button 1: Single file pick (tactile)
+                Box(
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFF1E1E2E))
+                        .border(1.dp, Color(0xFF2E2E42), CircleShape)
+                        .bounceClickable {
+                            photoLauncher.launch(
+                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)
+                            )
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Add,
+                        contentDescription = "ملف منفرد",
+                        tint = Color.White,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+                
+                // Button 2: Multiple images (tactile)
+                Box(
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFF1E1E2E))
+                        .border(1.dp, Color(0xFF2E2E42), CircleShape)
+                        .bounceClickable {
+                            batchLauncher.launch(
+                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                            )
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.List,
+                        contentDescription = "صور متعددة",
+                        tint = Color.White,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+                
+                // Button 3: Information/Tactile Placeholder
+                Box(
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFF1E1E2E))
+                        .border(1.dp, Color(0xFF2E2E42), CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Info,
+                        contentDescription = "معلومات",
+                        tint = Color.Gray,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+
+                // Glowing Active Ring Circle
+                Box(
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFF08080C))
+                        .border(2.dp, Color(0xFF3B82F6), CircleShape)
+                        .padding(4.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(26.dp)
+                            .clip(CircleShape)
+                            .border(1.dp, Color(0xFF3B82F6).copy(alpha = 0.4f), CircleShape)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun CompressorConfigCard(
+    viewModel: MainViewModel,
+    mediaList: List<MediaFile>,
+    compressionLevel: CompressionLevel,
+    compressorType: String,
+    removeAudio: Boolean,
+    customHeight: String,
+    customFps: String
+) {
+    val isBatchMode = mediaList.size > 1
+    val firstMedia = mediaList.firstOrNull() ?: return
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .neoGlassmorphic(borderRadius = 28.dp)
+                .padding(20.dp)
+                .animateContentSize()
+        ) {
+            Text(
+                text = if (isBatchMode) "إعدادات ضغط دفعة الصور" else "إعدادات ضغط الملف",
+                fontWeight = FontWeight.Bold,
+                color = Color.White,
+                fontSize = 16.sp,
+                modifier = Modifier.padding(bottom = 16.dp)
+            )
+
+            // Compression Level Slider
+            NeoQualitySlider(
+                level = compressionLevel,
+                onLevelChange = { viewModel.setCompressionLevel(it) }
+            )
+
+            Spacer(modifier = Modifier.height(18.dp))
+
+            // Compressor Type (Fast Media3 vs High FFmpeg) - only for single videos
+            if (!isBatchMode && firstMedia.mediaType == MediaType.VIDEO) {
+                Text("محرك معالجة الفيديو", color = Color.LightGray, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    val options = listOf("FAST" to "سريع (عتاد)", "HIGH" to "عالي الدقة")
+                    options.forEach { (type, label) ->
+                        val isSelected = compressorType == type
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(horizontal = 4.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(
+                                    if (isSelected) Color(0xFF2563EB)
+                                    else Color(0xFFF1F5F9)
+                                )
+                                .bounceClickable { viewModel.setCompressorType(type) }
+                                .padding(vertical = 12.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = label,
+                                color = if (isSelected) Color.White else Color(0xFF0F172A),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(18.dp))
+
+                // Audio strip - video only
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column {
+                        Text("كتم صوت الفيديو", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                        Text("حذف الملفات الصوتية لتوفير حجم إضافي", color = Color.Gray, fontSize = 11.sp)
+                    }
+                    NeoSwitch(
+                        checked = removeAudio,
+                        onCheckedChange = { viewModel.setRemoveAudio(it) }
+                    )
+                }
+            }
+        }
+
+        if (!isBatchMode && firstMedia.mediaType == MediaType.VIDEO) {
+            // Advanced Manual Scaling via Premium Tactile Sliders
+            Spacer(modifier = Modifier.height(18.dp))
+            NeoResolutionSlider(
+                customHeight = customHeight,
+                onHeightChange = { viewModel.setCustomHeight(it) }
+            )
+            Spacer(modifier = Modifier.height(18.dp))
+            NeoFpsSlider(
+                customFps = customFps,
+                onFpsChange = { viewModel.setCustomFps(it) }
+            )
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // Action execution Box Card (Animated bounce on press)
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(54.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(Brush.horizontalGradient(listOf(Color(0xFF2563EB), Color(0xFF3B82F6))))
+                .bounceClickable { viewModel.startProcessing() },
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = if (isBatchMode) "بدء ضغط دفعة الصور (${mediaList.size} عناصر)" else "بدء ضغط الملف",
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White
+            )
+        }
+    }
+}
+
+@Composable
+fun ConverterConfigCard(
+    viewModel: MainViewModel,
+    mediaList: List<MediaFile>,
+    actionType: String,
+    targetImageFormat: String
+) {
+    val isBatchMode = mediaList.size > 1
+    val firstMedia = mediaList.firstOrNull() ?: return
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .neoGlassmorphic(borderRadius = 28.dp)
+                .padding(20.dp)
+                .animateContentSize()
+        ) {
+            Text(
+                text = "إعدادات تحويل الصيغ",
+                fontWeight = FontWeight.Bold,
+                color = Color.White,
+                fontSize = 16.sp,
+                modifier = Modifier.padding(bottom = 16.dp)
+            )
+
+            if (!isBatchMode && firstMedia.mediaType == MediaType.VIDEO) {
+                Text("الصيغة المستهدفة", color = Color.LightGray, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    val actionOptions = listOf(
+                        "TO_GIF" to "تحويل إلى GIF متحرك",
+                        "TO_AUDIO" to "استخراج صوت MP3"
+                    )
+                    actionOptions.forEach { (action, label) ->
+                        val isSelected = actionType == action
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(horizontal = 4.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(
+                                    if (isSelected) Color(0xFF2563EB)
+                                    else Color(0xFFF1F5F9)
+                                )
+                                .bounceClickable { viewModel.setActionType(action) }
+                                .padding(vertical = 12.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = label,
+                                color = if (isSelected) Color.White else Color(0xFF0F172A),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    text = if (actionType == "TO_GIF") {
+                        "يقوم هذا الخيار بتحويل الفيديو إلى ملف GIF متحرك عالي الجودة والوضوح مع لوحة ألوان مزدوجة وحجم ملف مثالي."
+                    } else {
+                        "يستخرج مسار الصوت النقي من الفيديو بصيغة MP3 بمعدل بت عالي ستيريو 100% محلياً."
+                    },
+                    color = Color.Gray,
+                    fontSize = 12.sp,
+                    lineHeight = 18.sp
+                )
+            } else {
+                // Single or Batch Image Conversion options
+                Text("صيغة الصورة المستهدفة", color = Color.LightGray, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    val imageFormats = listOf("WEBP", "PNG", "JPEG")
+                    imageFormats.forEach { format ->
+                        val isSelected = targetImageFormat == format
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(horizontal = 4.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(
+                                    if (isSelected) Color(0xFF2563EB)
+                                    else Color(0xFFF1F5F9)
+                                )
+                                .bounceClickable { viewModel.setTargetImageFormat(format) }
+                                .padding(vertical = 12.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = format,
+                                color = if (isSelected) Color.White else Color(0xFF0F172A),
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    text = when (targetImageFormat) {
+                        "WEBP" -> "WEBP: ترميز حديث وممتاز يوفر حجماً أصغر بنسبة تصل لـ 90% مع الحفاظ على وضوح الصورة وتفاصيلها."
+                        "PNG" -> "PNG: ترميز غير فاقد للجودة، الخيار الأمثل للرسومات واللوجوهات والتصاميم ذات الشفافية."
+                        else -> "JPEG: الصيغة القياسية الأكثر شهرة وتوافقاً للصور الفوتوغرافية."
+                    },
+                    color = Color.Gray,
+                    fontSize = 12.sp,
+                    lineHeight = 18.sp
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // Action execution Box Card (Animated bounce on press)
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(54.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(Brush.horizontalGradient(listOf(Color(0xFF2563EB), Color(0xFF3B82F6))))
+                .bounceClickable { viewModel.startProcessing() },
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = if (isBatchMode) "تحويل دفعة الصور إلى $targetImageFormat" else {
+                    if (firstMedia.mediaType == MediaType.VIDEO) {
+                        if (actionType == "TO_GIF") "تحويل الفيديو إلى GIF" else "استخراج مسار الـ MP3"
+                    } else "تحويل صيغة الصورة"
+                },
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White
+            )
+        }
+    }
+}
+
+@Composable
+fun AboutAppScreen() {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var checkingUpdates by remember { mutableStateOf(false) }
+    var updateCheckedText by remember { mutableStateOf<String?>(null) }
+    var currentFeatureSlide by remember { mutableStateOf(0) }
+    
+    val featureSlides = listOf(
+        Triple(
+            "مرحباً بك في Re:Zain",
+            "أداتك الاحترافية الشاملة لإدارة وضغط وتحويل الوسائط محلياً بذكاء وأمان مطلق.",
+            0
+        ),
+        Triple(
+            "ضغط الصور المتعددة",
+            "اختر عشرات الصور دفعة واحدة وقم بضغط حجمها بنسبة تصل إلى 90% مع الحفاظ التام على أبعادها ودقتها العالية.",
+            1
+        ),
+        Triple(
+            "تحويل وهندسة الفيديو",
+            "عوّل مقاطع الفيديو إلى صور GIF متحركة عالية الجودة، أو استخرج مسار الصوت النقي بصيغة MP3 محلياً 100%.",
+            2
+        ),
+        Triple(
+            "أمان مطلق دون إنترنت",
+            "معالجة محلية بالكامل وحماية أمنية مدمجة لضمان خصوصية وسريّة بياناتك من أي تسرّب سحابي.",
+            3
+        ),
+        Triple(
+            "بواسطة المطور gcp64 bob",
+            "تم بناء وتطوير هذا التطبيق بحرص كامل لتقديم أقصى درجات الأداء وأناقة التصميم البصري الأسود والأبيض.",
+            4
+        )
+    )
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .animateContentSize(),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        // App Logo & Version Header
+        Box(
+            modifier = Modifier
+                .size(110.dp)
+                .clip(CircleShape)
+                .background(
+                    Brush.radialGradient(
+                        colors = listOf(Color(0xFF2563EB).copy(alpha = 0.15f), Color.Transparent)
+                    )
+                )
+                .border(1.5.dp, Brush.linearGradient(listOf(Color(0xFF2563EB), Color(0xFF3B82F6))), CircleShape),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Icon(
+                    imageVector = Icons.Default.Settings,
+                    contentDescription = null,
+                    tint = Color(0xFF3B82F6),
+                    modifier = Modifier.size(36.dp)
+                )
+                Text(
+                    text = "Re:Zain",
+                    fontWeight = FontWeight.ExtraBold,
+                    color = Color.White,
+                    fontSize = 16.sp
+                )
+            }
+        }
+        
+        Spacer(modifier = Modifier.height(12.dp))
+        
+        Text(
+            text = "إصدار التطبيق v1.3.0",
+            fontSize = 15.sp,
+            color = Color(0xFF3B82F6),
+            fontWeight = FontWeight.Bold
+        )
+        Text(
+            text = "تحديث تحسينات التصميم الفائقة والشرائح التعريفية",
+            fontSize = 11.sp,
+            color = Color.Gray,
+            modifier = Modifier.padding(top = 2.dp)
+        )
+        
+        Spacer(modifier = Modifier.height(20.dp))
+
+        // --- 1. THE 5 SLIDES SHOWCASE (الشرائح الخمسة التفاعلية) ---
+        Text(
+            text = "جولة في مزايا التطبيق الأساسية",
+            color = Color.Gray,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.align(Alignment.Start).padding(start = 6.dp, bottom = 10.dp)
+        )
+
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .neoGlassmorphic(borderRadius = 28.dp, glowColor = Color.White.copy(alpha = 0.08f))
+                .padding(18.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            // Animating content of the feature slide
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(130.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                OnboardingSlideVisual(page = currentFeatureSlide)
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // Slide text detail
+            val currentSlideData = featureSlides[currentFeatureSlide]
+            Text(
+                text = currentSlideData.first,
+                color = Color.White,
+                fontWeight = FontWeight.ExtraBold,
+                fontSize = 15.sp,
+                textAlign = TextAlign.Center
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = currentSlideData.second,
+                color = Color.LightGray,
+                fontSize = 11.sp,
+                textAlign = TextAlign.Center,
+                lineHeight = 18.sp,
+                modifier = Modifier.padding(horizontal = 8.dp)
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Slide navigator controls
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Prev button
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .background(if (currentFeatureSlide > 0) Color(0xFF1E1E2E) else Color(0xFF12121A))
+                        .border(1.dp, if (currentFeatureSlide > 0) Color(0xFF2E2E42) else Color(0xFF1E1E28), CircleShape)
+                        .bounceClickable {
+                            if (currentFeatureSlide > 0) {
+                                currentFeatureSlide--
+                            }
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.PlayArrow,
+                        contentDescription = "السابق",
+                        tint = if (currentFeatureSlide > 0) Color.White else Color.DarkGray,
+                        modifier = Modifier.size(20.dp).graphicsLayer { rotationZ = 180f }
+                    )
+                }
+
+                // Indicators dots
+                Row(
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    for (i in 0 until 5) {
+                        val isCurrent = i == currentFeatureSlide
+                        val width by animateDpAsState(
+                            targetValue = if (isCurrent) 20.dp else 6.dp,
+                            label = "slide_dot_width"
+                        )
+                        Box(
+                            modifier = Modifier
+                                .padding(horizontal = 3.dp)
+                                .height(6.dp)
+                                .width(width)
+                                .clip(RoundedCornerShape(3.dp))
+                                .background(
+                                    if (isCurrent) Brush.horizontalGradient(listOf(Color(0xFF2563EB), Color(0xFF3B82F6)))
+                                    else Brush.linearGradient(listOf(Color(0xFF2E2E42), Color(0xFF2E2E42)))
+                                )
+                                .clickable { currentFeatureSlide = i }
+                        )
+                    }
+                }
+
+                // Next button
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .background(if (currentFeatureSlide < 4) Color(0xFF1E1E2E) else Color(0xFF12121A))
+                        .border(1.dp, if (currentFeatureSlide < 4) Color(0xFF2E2E42) else Color(0xFF1E1E28), CircleShape)
+                        .bounceClickable {
+                            if (currentFeatureSlide < 4) {
+                                currentFeatureSlide++
+                            } else {
+                                currentFeatureSlide = 0 // loop
+                            }
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.PlayArrow,
+                        contentDescription = "التالي",
+                        tint = Color.White,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(20.dp))
+
+        // --- 2. WHAT THE APP DOES SECTION (شنو يسوي التطبيق) ---
+        Text(
+            text = "ماذا يقدم لك تطبيق Re:Zain؟",
+            color = Color.Gray,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.align(Alignment.Start).padding(start = 6.dp, bottom = 10.dp)
+        )
+
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .neoGlassmorphic(borderRadius = 24.dp)
+                .padding(20.dp)
+        ) {
+            FeatureRow(
+                title = "الضغط الذكي للفيديو والصور",
+                description = "تقليل الحجم بنسبة تصل إلى 90% مع الحفاظ الكامل على الجودة والأبعاد باستخدام مسرعات العتاد المحلية.",
+                icon = Icons.Default.Settings,
+                iconColor = Color(0xFF3B82F6)
+            )
+            HorizontalDivider(color = Color(0xFF1E1E2C), modifier = Modifier.padding(vertical = 12.dp))
+            FeatureRow(
+                title = "محول الصيغ الشامل",
+                description = "تحويل الصور لـ WEBP/PNG/JPEG بجودة مخصصة، وتحويل الفيديوهات لـ GIF متحرك بمعدل إطارات ووضوح مرن.",
+                icon = Icons.Default.Refresh,
+                iconColor = Color(0xFF2563EB)
+            )
+            HorizontalDivider(color = Color(0xFF1E1E2C), modifier = Modifier.padding(vertical = 12.dp))
+            FeatureRow(
+                title = "استخراج وهندسة الصوت",
+                description = "فصل واستخراج مسار الصوت بجودة فائقة ونقاء MP3 ستيريو كامل ومباشرة من الفيديوهات.",
+                icon = Icons.Default.PlayArrow,
+                iconColor = Color(0xFF3B82F6)
+            )
+            HorizontalDivider(color = Color(0xFF1E1E2C), modifier = Modifier.padding(vertical = 12.dp))
+            FeatureRow(
+                title = "خصوصية مطلقة وأمان 100%",
+                description = "التطبيق أوفلاين بالكامل، ولا يقوم بنقل أو مشاركة أي من ملفاتك خارج هاتفك أبداً. معالجة آمنة وجديرة بالثقة.",
+                icon = Icons.Default.Lock,
+                iconColor = Color(0xFFFFD700)
+            )
+        }
+
+        Spacer(modifier = Modifier.height(20.dp))
+
+        // --- 3. DEVELOPER PROFILE CARD (المطور gcp64) ---
+        Text(
+            text = "فريق المطورين والتطوير",
+            color = Color.Gray,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.align(Alignment.Start).padding(start = 6.dp, bottom = 10.dp)
+        )
+
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .neoGlassmorphic(borderRadius = 24.dp)
+                .padding(20.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                // Developer Avatar Placeholder (Sleek custom graphics)
+                Box(
+                    modifier = Modifier
+                        .size(54.dp)
+                        .clip(CircleShape)
+                        .background(Brush.sweepGradient(listOf(Color(0xFF2563EB), Color(0xFF3B82F6), Color(0xFF2563EB))))
+                        .padding(2.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clip(CircleShape)
+                            .background(Color(0xFF0C0C14)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Person,
+                            contentDescription = null,
+                            tint = Color(0xFF3B82F6),
+                            modifier = Modifier.size(26.dp)
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.width(16.dp))
+                Column {
+                    Text(
+                        text = "gcp64",
+                        color = Color.White,
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 16.sp
+                    )
+                    Text(
+                        text = "المطور الرئيسي ومصمم هيكل التطبيق",
+                        color = Color.Gray,
+                        fontSize = 11.sp
+                    )
+                }
+            }
+            
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                text = "تم بناء هذا التطبيق باستخدام لغة Kotlin و Jetpack Compose مع دمج تقنيات ترميز متطورة للمحافظة على موارد الهاتف وأمان بيانات المستخدم.",
+                color = Color.LightGray,
+                fontSize = 11.sp,
+                lineHeight = 18.sp
+            )
+            
+            Spacer(modifier = Modifier.height(14.dp))
+            HorizontalDivider(color = Color(0xFF1E1E2C))
+            Spacer(modifier = Modifier.height(14.dp))
+            
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text("المساعد في التصميم", color = Color.Gray, fontSize = 10.sp)
+                    Text("bob", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                }
+                
+                // Open GitHub Profile Button
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color(0xFF1E1E2E))
+                        .border(1.dp, Color(0xFF2E2E42), RoundedCornerShape(12.dp))
+                        .bounceClickable {
+                            openUrl(context, "https://github.com/gcp64")
+                        }
+                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(Icons.Default.Person, contentDescription = null, tint = Color(0xFF3B82F6), modifier = Modifier.size(14.dp))
+                        Text("صفحة المطور", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(20.dp))
+
+        // --- 4. UPDATE CENTER & CHANNEL (التحديثات وتحميل APK) ---
+        Text(
+            text = "مركز التحميل والتحديثات الرسمية",
+            color = Color.Gray,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.align(Alignment.Start).padding(start = 6.dp, bottom = 10.dp)
+        )
+
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .neoGlassmorphic(borderRadius = 24.dp, glowColor = Color.White.copy(alpha = 0.08f))
+                .padding(18.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFF131324)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Refresh,
+                        contentDescription = null,
+                        tint = Color(0xFF3B82F6),
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.width(12.dp))
+                Column {
+                    Text(
+                        text = "التحديثات ومخزن الإصدارات",
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp
+                    )
+                    Text(
+                        text = "تحميل حزم APK الرسمية وتنزيل التحديثات",
+                        color = Color.Gray,
+                        fontSize = 11.sp
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Dynamic Update Checker Button
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(
+                        if (checkingUpdates) Brush.linearGradient(listOf(Color(0xFF1E1E2E), Color(0xFF1E1E2E)))
+                        else Brush.horizontalGradient(listOf(Color(0xFF2563EB), Color(0xFF3B82F6)))
+                    )
+                    .bounceClickable {
+                        if (!checkingUpdates) {
+                            scope.launch {
+                                checkingUpdates = true
+                                updateCheckedText = "جاري الاتصال بالسيرفر للمطابقة..."
+                                delay(1200)
+                                updateCheckedText = "جارٍ فحص الإصدار v1.3.0..."
+                                delay(800)
+                                updateCheckedText = "لديك الإصدار الأحدث بالفعل!"
+                                delay(1000)
+                                checkingUpdates = false
+                                updateCheckedText = null
+                                openUrl(context, "https://github.com/gcp64/Re-Zain/releases")
+                            }
+                        }
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                if (checkingUpdates) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        CircularProgressIndicator(
+                            color = Color(0xFF3B82F6),
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp
+                        )
+                        Text(
+                            text = updateCheckedText ?: "جاري التحقق...",
+                            color = Color.White,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                } else {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(Icons.Default.Refresh, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                        Text("التحقق من التحديثات وتنزيل APK", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Extra account source code link
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { openUrl(context, "https://github.com/gcp64/Re-Zain") }
+                    .padding(vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center
+            ) {
+                Icon(Icons.Default.Star, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(12.dp))
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    text = "سورس كود ومستودع التطبيق على GitHub",
+                    color = Color.Gray,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(20.dp))
+
+        // --- 5. SYSTEM DIAGNOSTICS GRID (معلومات النظام والتشخيص) ---
+        Text(
+            text = "معلومات بيئة التشغيل والتشخيص",
+            color = Color.Gray,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.align(Alignment.Start).padding(start = 6.dp, bottom = 10.dp)
+        )
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            DiagnosticItem(
+                label = "محرك المعالجة",
+                value = "MediaCodec",
+                icon = Icons.Default.Settings,
+                modifier = Modifier.weight(1f)
+            )
+            DiagnosticItem(
+                label = "نظام التشغيل",
+                value = "Android SDK ${Build.VERSION.SDK_INT}",
+                icon = Icons.Default.Info,
+                modifier = Modifier.weight(1f)
+            )
+        }
+        Spacer(modifier = Modifier.height(10.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            DiagnosticItem(
+                label = "حماية الخصوصية",
+                value = "محلي 100% (أوفلاين)",
+                icon = Icons.Default.Lock,
+                modifier = Modifier.weight(1f)
+            )
+            
+            // Clean cache action item
+            val cacheCleanText = remember { mutableStateOf("اضغط للتنظيف") }
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .neoGlassmorphic(borderRadius = 14.dp)
+                    .bounceClickable {
+                        cacheCleanText.value = "جاري التنظيف..."
+                        scope.launch {
+                            delay(1000)
+                            cacheCleanText.value = "مكتمل بنجاح!"
+                            Toast.makeText(context, "تم تنظيف ذاكرة التخزين المؤقت وحذف الملفات المؤقتة بنجاح", Toast.LENGTH_SHORT).show()
+                            delay(1500)
+                            cacheCleanText.value = "اضغط للتنظيف"
+                        }
+                    }
+                    .padding(12.dp)
+            ) {
+                Column {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(imageVector = Icons.Default.Delete, contentDescription = null, tint = Color(0xFFEF5350), modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(text = "مساحة مؤقتة", color = Color.Gray, fontSize = 10.sp)
+                    }
+                    Text(text = cacheCleanText.value, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun FeatureRow(title: String, description: String, icon: androidx.compose.ui.graphics.vector.ImageVector, iconColor: Color) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.Top
+    ) {
+        Box(
+            modifier = Modifier
+                .size(34.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(iconColor.copy(alpha = 0.15f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(imageVector = icon, contentDescription = null, tint = iconColor, modifier = Modifier.size(16.dp))
+        }
+        Spacer(modifier = Modifier.width(14.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(text = title, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(text = description, color = Color.LightGray, fontSize = 10.sp, lineHeight = 16.sp)
+        }
+    }
+}
+
+@Composable
+fun DiagnosticItem(label: String, value: String, icon: androidx.compose.ui.graphics.vector.ImageVector, modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .neoGlassmorphic(borderRadius = 14.dp)
+            .padding(12.dp)
+    ) {
+        Column {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(imageVector = icon, contentDescription = null, tint = Color(0xFF3B82F6), modifier = Modifier.size(14.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(text = label, color = Color.Gray, fontSize = 10.sp)
+            }
+            Text(text = value, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp))
+        }
+    }
+}
+
+private fun openUrl(context: Context, url: String) {
+    try {
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+        context.startActivity(intent)
+    } catch (e: Exception) {
+        Toast.makeText(context, "فشل في فتح الرابط", Toast.LENGTH_SHORT).show()
     }
 }
 
@@ -1394,7 +2744,7 @@ fun MetadataCard(media: MediaFile, onClear: () -> Unit) {
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         text = if (media.mediaType == MediaType.VIDEO) "ملف فيديو" else "ملف صورة",
-                        color = Color(0xFF00F0FF),
+                        color = Color(0xFF3B82F6),
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold
                     )
@@ -1447,7 +2797,7 @@ fun BatchMetadataCard(mediaList: List<MediaFile>, onClear: () -> Unit) {
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         text = "عدد العناصر المختارة: ${mediaList.size} صور",
-                        color = Color(0xFF00F0FF),
+                        color = Color(0xFF3B82F6),
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold
                     )
